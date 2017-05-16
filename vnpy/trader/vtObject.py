@@ -97,7 +97,8 @@ class VtBarData(VtBaseData):
         self.datetime = None                # python的datetime时间对象
         
         self.volume = EMPTY_INT             # 成交量
-        self.openInterest = EMPTY_INT       # 持仓量    
+        self.openInterest = EMPTY_INT       # 持仓量
+        self.finished = False
     
 
 ########################################################################
@@ -319,8 +320,3 @@ class VtCancelOrderReq(object):
         self.orderID = EMPTY_STRING             # 报单号
         self.frontID = EMPTY_STRING             # 前置机号
         self.sessionID = EMPTY_STRING           # 会话号
-  
-
-    
-    
-    

@@ -4,7 +4,7 @@
 CTA模块相关的GUI控制组件
 '''
 
-
+from vnpy.trader.vtEvent import *
 from vnpy.event import Event
 from uiBasicWidget import QtGui, QtCore, QtWidgets, BasicCell
 from language import text

@@ -7,6 +7,7 @@
 
 import talib
 import numpy as np
+import time
 
 from vnpy.trader.vtConstant import EMPTY_STRING
 from vnpy.trader.ctaStrategy.ctaTemplate import CtaTemplate
@@ -19,16 +20,16 @@ class MAandChannelStrategy(CtaTemplate):
     author = u'Song'
 
     # 策略参数
-    atrLength = 22  # 计算ATR指标的窗口数
     chnelLength = 20 # 计算通道的窗口数
+    maLength = 20
 
-    trailingPercent = 0.8  # 百分比移动止损
     initDays = 10  # 初始化数据所用的天数
     fixedSize = 1  # 每次交易的数量
 
     # 策略变量
     bar = None  # K线对象
-    lastTickTime = None
+    lastTickTime = None  #上一个tick的时间
+    lastBarMinute = None  #上一根k线的时间　
 
     bufferSize = 100  # 需要缓存的数据的大小
     bufferCount = 0  # 目前已经缓存了的数据的计数
@@ -36,7 +37,6 @@ class MAandChannelStrategy(CtaTemplate):
     highArray = np.zeros(bufferSize)  # K线最高价的数组
     lowArray = np.zeros(bufferSize)  # K线最低价的数组
     closeArray = np.zeros(bufferSize)  # K线收盘价的数组
-
     maArray = np.zeros(4)
 
 
@@ -47,18 +47,14 @@ class MAandChannelStrategy(CtaTemplate):
                  'className',
                  'author',
                  'vtSymbol',
-                 'atrLength',
-                 'chnelLenght']
+                 'chnelLength',
+                 'maLength']
 
     # 变量列表，保存了变量的名称
     varList = ['inited',
                'trading',
                'pos',
-               'atrValue',
-               'atrMa',
-               'rsiValue',
-               'rsiBuy',
-               'rsiSell']
+               ]
 
     # ----------------------------------------------------------------------
     def __init__(self, ctaEngine, setting):
@@ -114,7 +110,7 @@ class MAandChannelStrategy(CtaTemplate):
         self.tickCount += 1
 
         if tickMinute % 30 > 0:
-            if self.bar:
+            if self.bar: #TODO bar下面加了一个字段
                 bar = self._updateBar(tick)
             else:
                 bar = self._creatNewBar(tick)
@@ -123,15 +119,16 @@ class MAandChannelStrategy(CtaTemplate):
                 if lastTickTime.minute % 30 == 0:
                     bar = self._updateBar(tick)
                 else:
+                    self.bar.finished = True
+                    self.onBar(self.bar)
                     bar = self._creatNewBar(tick)
             else:
                 bar = self._creatNewBar(tick)
-        self.bar = bar  # 这种写法为了减少一层访问，加快速度
+        self.bar = bar
         self.onBar(bar)
 
-    #创建新k线
-    @classmethod
-    def _creatNewBar(tick):
+    def _creatNewBar(self, tick):
+        """创建新k线"""
         bar = CtaBarData()
         bar.vtSymbol = tick.vtSymbol
         bar.symbol = tick.symbol
@@ -147,8 +144,8 @@ class MAandChannelStrategy(CtaTemplate):
         bar.datetime = tick.datetime  # K线的时间设为第一个Tick的时间
         return bar
 
-    #更新当前K线
     def _updateBar(self, tick):
+        """更新当前K线"""
         bar = self.bar
         bar.close = tick.lastPrice
         bar.high = max(bar.high, tick.lastPrice)
@@ -163,7 +160,7 @@ class MAandChannelStrategy(CtaTemplate):
             self.cancelOrder(orderID)
         self.orderList = []
 
-        # 保存K线数据
+        # TODO 这里有问题，每个tick都调用OnBar
         self.closeArray[0:self.bufferSize - 1] = self.closeArray[1:self.bufferSize]
         self.highArray[0:self.bufferSize - 1] = self.highArray[1:self.bufferSize]
         self.lowArray[0:self.bufferSize - 1] = self.lowArray[1:self.bufferSize]
@@ -177,12 +174,7 @@ class MAandChannelStrategy(CtaTemplate):
             return
 
         # 计算指标数值
-        self.atrValue = talib.ATR(self.highArray,
-                                  self.lowArray,
-                                  self.closeArray,
-                                  self.atrLength)[-1]
-
-        self.maArray = talib.MA(self.closeArray)[-5:-1]
+        self.maArray = talib.MA(self.closeArray, self.maLength)[-5:-1]
         # 判断是否要进行交易
         maConLong = self.maArray[0] < self.maArray[1] < self.maArray[2] < self.maArray[3]
         maConShort = self.maArray[0] > self.maArray[1] > self.maArray[2] > self.maArray[3]
@@ -191,16 +183,21 @@ class MAandChannelStrategy(CtaTemplate):
         crossOverH = bar.high > HH
         crossUnderL = bar.low < LL
 
-
-        if self.pos <= 0 and crossOverH and maConLong:
+        if crossOverH and maConLong:
             targetPrice = max(HH, bar.open)
-            orderID = self.buy(targetPrice, self.fixedSize)
-            self.orderList.append(orderID)
+            if self.pos == 0:
+                self.buy(targetPrice, self.fixedSize)
+            elif self.pos < 0:
+                self.cover(targetPrice, abs(self.pos))
+                self.buy(targetPrice, self.fixedSize)
 
-        elif self.pos >= 0 and crossUnderL and maConShort:
+        elif crossUnderL and maConShort:
             targetPrice = min(LL, bar.open)
-            orderID = self.sell(targetPrice, self.fixedSize)
-            self.orderList.append(orderID)
+            if self.pos == 0:
+                self.short(targetPrice, self.fixedSize)
+            elif self.pos > 0:
+                self.sell(targetPrice, self.pos)
+                self.short(targetPrice, self.fixedSize)
 
         # 发出状态更新事件
         self.putEvent()
@@ -238,7 +235,7 @@ if __name__ == '__main__':
     engine.setPriceTick(0.2)  # 股指最小价格变动
 
     # 设置使用的历史数据库
-    engine.setDatabase(MINUTE30_DB_NAME, 'i9888')
+    engine.setDatabase(MINUTE30_DB_NAME, 'rb888')
 
     # 在引擎中创建策略对象
     d = {'atrLength': 11}

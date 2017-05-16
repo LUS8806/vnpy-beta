@@ -5,8 +5,8 @@ import csv
 import os
 from collections import OrderedDict
 
-#from PyQt4 import QtGui, QtCore
-from qtpy import QtWidgets, QtGui, QtCore
+from PyQt4 import QtGui, QtCore
+from qtpy import QtWidgets, QtCore #, QtGui
 
 from vnpy.event import *
 from vnpy.trader.vtEvent import *
